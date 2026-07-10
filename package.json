@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
+    "start": "NODE_OPTIONS=\"--experimental-require-module\" node src/index.js",
     "db:migrate": "node src/scripts/migrate.js",
     "db:seed": "node src/scripts/seed.js"
   },
@@ -29,4 +29,5 @@
   "devDependencies": {
     "nodemon": "^3.1.4"
   }
+  
 }
