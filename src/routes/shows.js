@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { Op } from 'sequelize';
+// import { Op } from 'sequelize';
+import Sequelize from 'sequelize';
+const { Op } = Sequelize;
 import { Show, ShowDate, Venue, Artist } from '../models/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
