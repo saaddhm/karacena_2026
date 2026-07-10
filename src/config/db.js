@@ -1,4 +1,5 @@
 import { Sequelize } from 'sequelize';
+import mysql2 from 'mysql2'; // <-- 1. On importe le driver directement
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -10,6 +11,7 @@ export const sequelize = new Sequelize(
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,
     dialect: 'mysql',
+    dialectModule: mysql2, // <-- 2. On force Sequelize à utiliser l'instance importée
     logging: false,
     define: { underscored: true },
     pool: { max: 10, min: 0, acquire: 30000, idle: 10000 }
