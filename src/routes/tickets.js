@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { Op, fn, col } from 'sequelize';
+import Sequelize from 'sequelize';
+const { Op, fn, col } = Sequelize;
 import { sequelize, Ticket, Booking, ShowDate, Show, Venue } from '../models/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { streamTicketPdf } from '../utils/ticketPdf.js';
