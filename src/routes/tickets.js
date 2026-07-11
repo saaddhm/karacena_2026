@@ -22,7 +22,7 @@ function extractToken(raw) {
     if (j && typeof j === 'object') return j.code || j.token || null;
     if (typeof j === 'string') return j;
   } catch { /* not JSON */ }
-  const m = /check-in\/([A-Za-z0-9_-]+)/.exec(s);
+  const m = /(?:check-in|billets|tickets)\/([A-Za-z0-9_-]+)/.exec(s);
   if (m) return m[1];
   return /^[A-Za-z0-9_-]{8,64}$/.test(s) ? s : null;
 }

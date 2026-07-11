@@ -68,33 +68,92 @@ router.post('/',
 // This verified handler is the authoritative place where payment is confirmed.
 router.post('/cmi/callback', async (req, res) => {
   const p = req.body || {};
-  if (!p.oid) return res.status(400).send('FAILURE');
-  if (!verifyCmiHash(p)) return res.status(400).send('FAILURE');
+  if (!p.oid) { console.warn('[payment] callback without oid'); return res.status(400).send('FAILURE'); }
+  if (!verifyCmiHash(p)) {
+    console.warn(`[payment] callback oid=${p.oid} INVALID HASH — ignored`);
+    return res.status(400).send('FAILURE');
+  }
 
   if (p.ProcReturnCode === '00') {
     const result = await confirmBookingPayment(p.oid, { paymentRef: p.TransId || p.oid });
-    if (result.ok) return res.send('ACTION=POSTAUTH'); // capture the pre-authorization
+    if (result.ok) {
+      console.log(`[payment] callback oid=${p.oid} ${result.alreadyPaid ? 'duplicate ignored (already PAID)' : 'CONFIRMED → PAID'} tx=${p.TransId || '-'}`);
+      return res.send('ACTION=POSTAUTH'); // capture the pre-authorization
+    }
     // OVERSOLD (or missing booking): do not capture → pre-auth is released.
+    console.warn(`[payment] callback oid=${p.oid} NOT captured (${result.code})`);
     return res.send('FAILURE');
   }
   await markBookingClosed(p.oid, 'FAILED');
+  console.log(`[payment] callback oid=${p.oid} declined ProcReturnCode=${p.ProcReturnCode}`);
   res.send('FAILURE');
 });
 
-// CMI: browser return (okUrl / failUrl) — hash-verified, then same confirm path.
-// Never trusts the redirect alone: the hash proves the params came from CMI.
-router.post('/cmi/return', async (req, res) => {
-  const p = req.body || {};
+// CMI: browser return (okUrl / failUrl). CMI normally POSTs the result here,
+// but the browser can also arrive via GET (3-D Secure redirect chains, page
+// refresh, back button, manual open) — both must redirect to the React site.
+// Reaching this URL NEVER marks a booking paid by itself: only hash-verified
+// CMI data may finalize, and the redirect decision reads the DATABASE state
+// (the server-to-server callback may have already settled it either way).
+async function handleCmiReturn(req, res) {
+  const p = { ...(req.query || {}), ...(req.body || {}) };
   const base = clientBaseUrl();
-  if (!p.oid) return res.redirect(`${base}/billetterie`);
-  if (verifyCmiHash(p)) {
-    if (p.ProcReturnCode === '00') {
-      await confirmBookingPayment(p.oid, { paymentRef: p.TransId || p.oid });
-    } else {
-      await markBookingClosed(p.oid, 'FAILED');
+  const oid = typeof p.oid === 'string' ? p.oid : '';
+  const to = (page, ref) =>
+    res.redirect(`${base}/paiement/${page}${ref ? `?reference=${encodeURIComponent(ref)}` : ''}`);
+
+  try {
+    if (!oid) {
+      console.warn('[payment] return without oid → echec');
+      return to('echec');
     }
+
+    // Same authenticity rule as the callback: only a valid HASH can finalize.
+    if (p.HASH && verifyCmiHash(p)) {
+      if (p.ProcReturnCode === '00') {
+        const result = await confirmBookingPayment(oid, { paymentRef: p.TransId || oid });
+        console.log(`[payment] return oid=${oid} verified ok → ${result.ok ? (result.alreadyPaid ? 'already PAID' : 'PAID') : result.code}`);
+      } else {
+        await markBookingClosed(oid, 'FAILED');
+        console.log(`[payment] return oid=${oid} declined ProcReturnCode=${p.ProcReturnCode}`);
+      }
+    } else {
+      console.log(`[payment] return oid=${oid} unverified (${p.HASH ? 'bad hash' : 'no hash'}) → deciding from DB`);
+    }
+
+    // Source of truth: current booking status in the database.
+    const booking = await Booking.findOne({ where: { reference: oid } });
+    if (!booking) return to('echec');
+    if (booking.paymentStatus === 'PAID') {
+      console.log(`[payment] return oid=${oid} redirect → succes`);
+      return to('succes', oid);
+    }
+    if (['FAILED', 'CANCELLED', 'EXPIRED', 'REFUNDED'].includes(booking.paymentStatus)) {
+      console.log(`[payment] return oid=${oid} redirect → echec`);
+      return to('echec', oid);
+    }
+    console.log(`[payment] return oid=${oid} redirect → en-attente`);
+    return to('en-attente', oid);
+  } catch (e) {
+    console.error('[payment] return handler error:', e.message);
+    return to(oid ? 'en-attente' : 'echec', oid || undefined);
   }
-  res.redirect(`${base}/billetterie/confirmation/${encodeURIComponent(p.oid)}`);
+}
+router.post('/cmi/return', handleCmiReturn);
+router.get('/cmi/return', handleCmiReturn);
+
+// Public: safe status for the pending-page polling. Exposes ONLY the state.
+// Booking references are unguessable (crypto-random), which prevents enumeration.
+router.get('/:reference/payment-status', async (req, res, next) => {
+  try {
+    const booking = await Booking.findOne({
+      where: { reference: req.params.reference }, attributes: ['paymentStatus']
+    });
+    if (!booking) return res.status(404).json({ status: 'unknown' });
+    const st = booking.paymentStatus === 'PAID' ? 'paid'
+      : booking.paymentStatus === 'PENDING' ? 'pending' : 'failed';
+    res.json({ status: st });
+  } catch (e) { next(e); }
 });
 
 // CMI: initiate payment — returns gateway URL + signed form fields to auto-submit.

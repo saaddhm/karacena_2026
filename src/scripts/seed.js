@@ -17,6 +17,11 @@ async function seed() {
     where: { email: process.env.ADMIN_EMAIL || 'admin@karacena.ma' },
     defaults: { name: 'Admin Karacena', passwordHash, role: 'admin' }
   });
+  await admin.update({
+    name: admin.name || 'Admin Karacena',
+    passwordHash,
+    role: 'admin'
+  });
 
   // ----- Venues (Salé) -----
   const venues = await Venue.bulkCreate([
