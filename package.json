@@ -8,7 +8,9 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "db:migrate": "node src/scripts/migrate.js",
-    "db:seed": "node src/scripts/seed.js"
+    "db:seed": "node src/scripts/seed.js",
+    "db:seed:program": "node src/scripts/seedProgram2026.js",
+    "test:video": "node --test test/video-url.test.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

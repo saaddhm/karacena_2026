@@ -145,7 +145,7 @@
 // export const NewsletterSubscriber = sequelize.define('newsletter_subscriber', {
 //   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
 //   email: { type: DataTypes.STRING(180), allowNull: false, unique: true, validate: { isEmail: true } },
-//   locale: { type: DataTypes.ENUM('fr', 'en'), defaultValue: 'fr' },
+//   locale: { type: DataTypes.ENUM('fr', 'en', 'ar'), defaultValue: 'fr' },
 //   isConfirmed: { type: DataTypes.BOOLEAN, defaultValue: true },
 //   unsubscribedAt: DataTypes.DATE
 // }, { tableName: 'newsletter_subscribers' });
@@ -250,6 +250,7 @@ import Sequelize from 'sequelize';
 const { DataTypes } = Sequelize;
 
 import { sequelize } from '../config/db.js';
+import { attachSlugHook } from '../utils/slug.js';
 
 // ---------- users ----------
 export const User = sequelize.define('user', {
@@ -257,24 +258,51 @@ export const User = sequelize.define('user', {
   name: { type: DataTypes.STRING(120), allowNull: false },
   email: { type: DataTypes.STRING(180), allowNull: false, unique: true, validate: { isEmail: true } },
   passwordHash: { type: DataTypes.STRING(255), allowNull: false },
-  role: { type: DataTypes.ENUM('admin', 'editor'), defaultValue: 'editor' }
+  role: { type: DataTypes.ENUM('superadmin', 'admin', 'editor', 'user'), defaultValue: 'editor' },
+  status: { type: DataTypes.ENUM('active', 'inactive'), allowNull: false, defaultValue: 'active' },
+  lastLogin: DataTypes.DATE,
+  createdBy: DataTypes.INTEGER.UNSIGNED,
+  updatedBy: DataTypes.INTEGER.UNSIGNED
 }, { tableName: 'users' });
+
+// ---------- settings (réglages globaux clé/valeur) ----------
+export const Setting = sequelize.define('setting', {
+  key: { type: DataTypes.STRING(80), primaryKey: true },
+  value: { type: DataTypes.STRING(255), allowNull: false }
+}, { tableName: 'settings' });
+
+// ---------- audit_logs (journal des actions d'administration) ----------
+export const AuditLog = sequelize.define('audit_log', {
+  id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
+  action: { type: DataTypes.STRING(60), allowNull: false },   // USER_CREATE, USER_UPDATE, USER_PASSWORD, USER_STATUS, USER_ROLE, USER_DELETE
+  targetType: { type: DataTypes.STRING(60), defaultValue: 'user' },
+  targetId: DataTypes.INTEGER.UNSIGNED,
+  targetLabel: DataTypes.STRING(255),                          // email/nom au moment de l'action
+  actorId: DataTypes.INTEGER.UNSIGNED,
+  actorEmail: DataTypes.STRING(180),
+  ip: DataTypes.STRING(64),
+  details: DataTypes.JSON
+}, { tableName: 'audit_logs', updatedAt: false });
 
 // ---------- venues ----------
 export const Venue = sequelize.define('venue', {
   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
   nameFr: { type: DataTypes.STRING(180), allowNull: false },
   nameEn: { type: DataTypes.STRING(180), allowNull: false },
+  nameAr: DataTypes.STRING(180),
   slug: { type: DataTypes.STRING(180), allowNull: false, unique: true },
   addressFr: DataTypes.STRING(255),
   addressEn: DataTypes.STRING(255),
+  addressAr: DataTypes.STRING(255),
   descriptionFr: DataTypes.TEXT,
   descriptionEn: DataTypes.TEXT,
+  descriptionAr: DataTypes.TEXT,
   latitude: DataTypes.DECIMAL(10, 7),
   longitude: DataTypes.DECIMAL(10, 7),
   capacity: DataTypes.INTEGER,
   accessInfoFr: DataTypes.TEXT,
   accessInfoEn: DataTypes.TEXT,
+  accessInfoAr: DataTypes.TEXT,
   imageUrl: DataTypes.STRING(500)
 }, { tableName: 'venues' });
 
@@ -282,11 +310,14 @@ export const Venue = sequelize.define('venue', {
 export const Artist = sequelize.define('artist', {
   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
   name: { type: DataTypes.STRING(180), allowNull: false },
+  nameAr: DataTypes.STRING(180),
   slug: { type: DataTypes.STRING(180), allowNull: false, unique: true },
   country: DataTypes.STRING(100),
+  disciplineAr: DataTypes.STRING(180),
   discipline: DataTypes.STRING(180),
   bioFr: DataTypes.TEXT,
   bioEn: DataTypes.TEXT,
+  bioAr: DataTypes.TEXT,
   photoUrl: DataTypes.STRING(500),
   websiteUrl: DataTypes.STRING(500),
   isCompany: { type: DataTypes.BOOLEAN, defaultValue: false }
@@ -297,18 +328,22 @@ export const Show = sequelize.define('show', {
   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
   titleFr: { type: DataTypes.STRING(255), allowNull: false },
   titleEn: { type: DataTypes.STRING(255), allowNull: false },
+  titleAr: DataTypes.STRING(255),
   slug: { type: DataTypes.STRING(255), allowNull: false, unique: true },
   category: { type: DataTypes.ENUM('AMESIP', 'LAUREATS', 'INTERNATIONAL'), allowNull: false },
   summaryFr: DataTypes.TEXT,
   summaryEn: DataTypes.TEXT,
+  summaryAr: DataTypes.TEXT,
   descriptionFr: DataTypes.TEXT('long'),
   descriptionEn: DataTypes.TEXT('long'),
+  descriptionAr: DataTypes.TEXT('long'),
   durationMinutes: DataTypes.INTEGER,
   ageMinimum: DataTypes.INTEGER,
   posterUrl: DataTypes.STRING(500),
   teaserVideoUrl: DataTypes.STRING(500),
   galleryJson: { type: DataTypes.JSON, defaultValue: [] },
-  priceMad: { type: DataTypes.DECIMAL(8, 2), defaultValue: 0 },
+  priceMad: { type: DataTypes.DECIMAL(8, 2), defaultValue: 0 }, // tarif adulte
+  priceChildMad: { type: DataTypes.DECIMAL(8, 2), allowNull: true }, // tarif enfant (null = pas de tarif réduit)
   isFree: { type: DataTypes.BOOLEAN, defaultValue: false },
   isFeatured: { type: DataTypes.BOOLEAN, defaultValue: false },
   isPublished: { type: DataTypes.BOOLEAN, defaultValue: true }
@@ -337,7 +372,8 @@ export const Booking = sequelize.define('booking', {
   customerEmail: { type: DataTypes.STRING(180), allowNull: false, validate: { isEmail: true } },
   customerPhone: DataTypes.STRING(40),
   type: { type: DataTypes.ENUM('SINGLE', 'PASS'), defaultValue: 'SINGLE' },
-  quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  quantity: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 }, // nombre TOTAL de places (adultes + enfants)
+  quantityChild: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // dont enfants
   totalMad: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
   paymentMethod: { type: DataTypes.ENUM('CMI', 'ONSITE'), defaultValue: 'CMI' },
   paymentStatus: { type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED', 'REFUNDED'), defaultValue: 'PENDING' },
@@ -361,12 +397,15 @@ export const BlogPost = sequelize.define('blog_post', {
   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
   titleFr: { type: DataTypes.STRING(255), allowNull: false },
   titleEn: { type: DataTypes.STRING(255), allowNull: false },
+  titleAr: DataTypes.STRING(255),
   slug: { type: DataTypes.STRING(255), allowNull: false, unique: true },
   category: { type: DataTypes.ENUM('NEWS', 'PORTRAIT', 'BACKSTAGE', 'INTERVIEW', 'VIDEO'), defaultValue: 'NEWS' },
   excerptFr: DataTypes.TEXT,
   excerptEn: DataTypes.TEXT,
+  excerptAr: DataTypes.TEXT,
   bodyFr: DataTypes.TEXT('long'),
   bodyEn: DataTypes.TEXT('long'),
+  bodyAr: DataTypes.TEXT('long'),
   coverUrl: DataTypes.STRING(500),
   videoUrl: DataTypes.STRING(500),
   isPublished: { type: DataTypes.BOOLEAN, defaultValue: false },
@@ -382,6 +421,7 @@ export const Partner = sequelize.define('partner', {
   websiteUrl: DataTypes.STRING(500),
   descriptionFr: DataTypes.TEXT,
   descriptionEn: DataTypes.TEXT,
+  descriptionAr: DataTypes.TEXT,
   displayOrder: { type: DataTypes.INTEGER, defaultValue: 0 },
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'partners' });
@@ -390,7 +430,7 @@ export const Partner = sequelize.define('partner', {
 export const NewsletterSubscriber = sequelize.define('newsletter_subscriber', {
   id: { type: DataTypes.INTEGER.UNSIGNED, primaryKey: true, autoIncrement: true },
   email: { type: DataTypes.STRING(180), allowNull: false, unique: true, validate: { isEmail: true } },
-  locale: { type: DataTypes.ENUM('fr', 'en'), defaultValue: 'fr' },
+  locale: { type: DataTypes.ENUM('fr', 'en', 'ar'), defaultValue: 'fr' },
   isConfirmed: { type: DataTypes.BOOLEAN, defaultValue: true },
   unsubscribedAt: DataTypes.DATE
 }, { tableName: 'newsletter_subscribers' });
@@ -440,8 +480,10 @@ export const HistoricalEdition = sequelize.define('historical_edition', {
   editionNumber: { type: DataTypes.INTEGER, allowNull: false },
   themeFr: { type: DataTypes.STRING(255), allowNull: false },
   themeEn: { type: DataTypes.STRING(255), allowNull: false },
+  themeAr: DataTypes.STRING(255),
   descriptionFr: DataTypes.TEXT,
   descriptionEn: DataTypes.TEXT,
+  descriptionAr: DataTypes.TEXT,
   coverUrl: DataTypes.STRING(500),
   galleryJson: { type: DataTypes.JSON, defaultValue: [] },
   videoUrl: DataTypes.STRING(500)
@@ -470,6 +512,12 @@ export const Translation = sequelize.define('translation', {
   tableName: 'translations',
   indexes: [{ unique: true, fields: ['namespace', 'key_name'] }]
 });
+
+// ---------- slug guards (always produce URL-safe, unique slugs) ----------
+attachSlugHook(Show, ['titleFr', 'titleEn', 'titleAr']);
+attachSlugHook(Venue, ['nameFr', 'nameEn', 'nameAr']);
+attachSlugHook(Artist, ['name', 'nameAr']);
+attachSlugHook(BlogPost, ['titleFr', 'titleEn', 'titleAr']);
 
 // ---------- associations ----------
 Show.belongsToMany(Artist, { through: ShowArtist });

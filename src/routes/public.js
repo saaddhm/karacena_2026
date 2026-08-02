@@ -13,7 +13,7 @@ const formLimiter = rateLimit({ windowMs: 60 * 1000, max: 10 });
 // Newsletter
 router.post('/newsletter', formLimiter,
   body('email').isEmail().normalizeEmail(),
-  body('locale').optional().isIn(['fr', 'en']),
+  body('locale').optional().isIn(['fr', 'en', 'ar']),
   validate,
   async (req, res, next) => {
     try {

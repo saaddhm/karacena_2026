@@ -4,11 +4,25 @@ import Sequelize from 'sequelize';
 const { Op } = Sequelize;
 import { Show, ShowDate, Venue, Artist } from '../models/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { body } from 'express-validator';
+import { validate } from '../middleware/validate.js';
+import { isSafeVideoUrl } from '../utils/videoUrl.js';
 
 const router = Router();
 const fullInclude = [
   { model: Artist, through: { attributes: [] } },
   { model: ShowDate, as: 'showDates', include: [Venue] }
+];
+const videoUrlValidation = [
+  body('teaserVideoUrl')
+    .optional({ nullable: true, checkFalsy: true })
+    .isString().withMessage('Teaser video URL must be a string.')
+    .bail()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Teaser video URL must not exceed 500 characters.')
+    .bail()
+    .custom(isSafeVideoUrl).withMessage('Teaser video URL must be a valid HTTP or HTTPS URL.'),
+  validate
 ];
 
 // Public: list published shows with filters (?category=&date=&venue=)
@@ -65,7 +79,7 @@ router.get('/admin/all', requireAuth, requireAdmin, async (req, res, next) => {
   catch (e) { next(e); }
 });
 
-router.post('/', requireAuth, requireAdmin, async (req, res, next) => {
+router.post('/', requireAuth, requireAdmin, videoUrlValidation, async (req, res, next) => {
   try {
     const { artistIds = [], ...data } = req.body;
     const show = await Show.create(data);
@@ -74,7 +88,7 @@ router.post('/', requireAuth, requireAdmin, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.put('/:id', requireAuth, requireAdmin, async (req, res, next) => {
+router.put('/:id', requireAuth, requireAdmin, videoUrlValidation, async (req, res, next) => {
   try {
     const show = await Show.findByPk(req.params.id);
     if (!show) return res.status(404).json({ error: 'Not found' });

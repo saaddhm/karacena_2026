@@ -36,6 +36,11 @@ export const sequelize = new Sequelize(
     dialectModule: mysql2, // Conservé par sécurité
     logging: false,
     define: { underscored: true },
+    // dateStrings : mysql2 renvoie les DATETIME comme chaîne brute
+    // "2026-08-22 16:00:00" — aucun objet Date créé côté serveur, donc plus de
+    // conversion UTC ni de suffixe « Z » dans les réponses de l'API.
+    // (N'affecte QUE la lecture ; l'écriture des séances reste identique.)
+    dialectOptions: { dateStrings: true },
     pool: { max: 10, min: 0, acquire: 30000, idle: 10000 }
   }
 );

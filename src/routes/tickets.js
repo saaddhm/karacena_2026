@@ -2,7 +2,7 @@ import { Router } from 'express';
 import Sequelize from 'sequelize';
 const { Op, fn, col } = Sequelize;
 import { sequelize, Ticket, Booking, ShowDate, Show, Venue } from '../models/index.js';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { requireAuth, requireAdmin, requireScannerAccess } from '../middleware/auth.js';
 import { streamTicketPdf } from '../utils/ticketPdf.js';
 
 const router = Router();
@@ -94,7 +94,7 @@ router.get('/admin/stats', requireAuth, requireAdmin, async (req, res, next) => 
 // ---------- Admin: atomic entrance check-in ----------
 // Backend is the sole authority. Conditional UPDATE guarantees a ticket can
 // only be checked in once, even with two simultaneous scanners.
-router.post('/check-in', requireAuth, requireAdmin, async (req, res, next) => {
+router.post('/check-in', requireAuth, requireScannerAccess, async (req, res, next) => {
   try {
     const token = extractToken(req.body?.token);
     if (!token) return res.status(400).json({ result: 'INVALID', error: 'Malformed token' });

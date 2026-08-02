@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { crudRouter } from '../utils/crud.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
+import { getPublicSettings, setBoolSetting } from '../utils/settings.js';
+import { logAudit } from '../utils/audit.js';
 import {
   Artist, Venue, ShowDate, Show, BlogPost, Partner, HistoricalEdition,
   NewsletterSubscriber, ContactMessage, PressAccreditation,
@@ -19,6 +21,38 @@ router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
       AtabadoulRegistration.count(), Ticket.count(), ContactMessage.count({ where: { status: 'NEW' } })
     ]);
     res.json({ shows, artists, subscribers, pressPending: press, atabadoul, tickets, newMessages: messages });
+  } catch (e) { next(e); }
+});
+
+// Réglages globaux — lecture (admin)
+router.get('/settings', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await getPublicSettings());
+  } catch (e) { next(e); }
+});
+
+// Réglages globaux — mise à jour (admin). Actuellement : paiement en ligne.
+router.put('/settings', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    if (typeof req.body?.onlinePaymentEnabled === 'boolean') {
+      await setBoolSetting('online_payment_enabled', req.body.onlinePaymentEnabled);
+      await logAudit(req, {
+        action: 'SETTINGS_UPDATE',
+        targetType: 'setting',
+        targetLabel: 'online_payment_enabled',
+        details: { onlinePaymentEnabled: req.body.onlinePaymentEnabled }
+      });
+    }
+    if (typeof req.body?.reservationsEnabled === 'boolean') {
+      await setBoolSetting('reservations_enabled', req.body.reservationsEnabled);
+      await logAudit(req, {
+        action: 'SETTINGS_UPDATE',
+        targetType: 'setting',
+        targetLabel: 'reservations_enabled',
+        details: { reservationsEnabled: req.body.reservationsEnabled }
+      });
+    }
+    res.json(await getPublicSettings());
   } catch (e) { next(e); }
 });
 

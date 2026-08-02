@@ -19,6 +19,11 @@ router.post('/login', loginLimiter,
       const user = await User.findOne({ where: { email: req.body.email } });
       const ok = user && await bcrypt.compare(req.body.password, user.passwordHash);
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+      // Un compte désactivé ne peut plus se connecter.
+      if (user.status === 'inactive') {
+        return res.status(403).json({ error: 'Account disabled' });
+      }
+      user.update({ lastLogin: new Date() }).catch(() => {});
       const token = jwt.sign(
         { id: user.id, email: user.email, role: user.role, name: user.name },
         process.env.JWT_SECRET,

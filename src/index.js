@@ -64,6 +64,7 @@ import { fileURLToPath } from 'url';
 
 import { connectDB } from './config/db.js';
 import { runMigrations } from './scripts/migrate.js';
+import { normalizeSlugs } from './scripts/normalizeSlugs.js';
 
 import authRoutes from './routes/auth.js';
 import showRoutes from './routes/shows.js';
@@ -71,6 +72,8 @@ import bookingRoutes from './routes/bookings.js';
 import ticketRoutes from './routes/tickets.js';
 import publicRoutes from './routes/public.js';
 import adminRoutes from './routes/admin.js';
+import userRoutes from './routes/users.js';
+import settingsRoutes from './routes/settings.js';
 
 import {
   notFound,
@@ -111,29 +114,47 @@ app.use(
 |--------------------------------------------------------------------------
 */
 
-const allowedOrigins = (process.env.CLIENT_URL || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = new Set(
+  [
+    // Origins from the environment (comma-separated)
+    ...(process.env.CLIENT_URL || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+
+    // Hostinger frontend
+    // CMI / Attijari hosted payment pages — the browser POSTs the okUrl /
+    // failUrl result from these origins after 3-D Secure.
+    'https://attijari-payment.cmi.co.ma',
+    'https://payment.cmi.co.ma',
+    'https://testpayment.cmi.co.ma',
+
+    // Local development
+    'http://localhost:5173',
+    'http://localhost:4173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+  ].map((origin) => origin.replace(/\/+$/, '')),
+);
 
 app.use(
   cors({
     origin(origin, callback) {
-      // Autoriser curl, Postman, CMI et les requêtes serveur à serveur
+      // No Origin header: curl, Postman, CMI server-to-server callback.
       if (!origin) {
         return callback(null, true);
       }
 
-      if (
-        allowedOrigins.length === 0 ||
-        allowedOrigins.includes(origin)
-      ) {
+      if (allowedOrigins.has(origin.replace(/\/+$/, ''))) {
         return callback(null, true);
       }
 
-      return callback(
-        new Error(`CORS origin not allowed: ${origin}`),
-      );
+      // Unknown origin: do NOT throw (a thrown error becomes an HTTP 500 and
+      // kills the request — this is what broke the CMI return redirect).
+      // Answering without CORS headers keeps browsers blocking cross-origin
+      // reads while letting legitimate top-level navigations through.
+      console.warn(`[cors] origin refused: ${origin}`);
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -210,6 +231,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/shows', showRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', publicRoutes);
 
@@ -256,6 +279,8 @@ async function startServer() {
 
     await runMigrations();
     console.log('✔ Database migrations completed');
+
+    await normalizeSlugs();
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`✔ Karacena API running on port ${PORT}`);
