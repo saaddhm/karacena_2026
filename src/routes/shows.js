@@ -48,7 +48,7 @@ router.get('/', async (req, res, next) => {
         include: [{ model: Venue, where: req.query.venue ? { slug: req.query.venue } : undefined }]
       }
     ];
-    const shows = await Show.findAll({ where, include, order: [['isFeatured', 'DESC'], ['titleFr', 'ASC']] });
+    const shows = await Show.findAll({ where, include, order: [[Sequelize.literal('display_order = 0'), 'ASC'], ['displayOrder', 'ASC'], ['isFeatured', 'DESC'], ['titleFr', 'ASC']] });
     res.json({ items: shows });
   } catch (e) { next(e); }
 });
@@ -75,7 +75,7 @@ router.get('/slug/:slug', async (req, res, next) => {
 
 // Admin CRUD
 router.get('/admin/all', requireAuth, requireAdmin, async (req, res, next) => {
-  try { res.json({ items: await Show.findAll({ include: fullInclude, order: [['id', 'DESC']] }) }); }
+  try { res.json({ items: await Show.findAll({ include: fullInclude, order: [[Sequelize.literal('display_order = 0'), 'ASC'], ['displayOrder', 'ASC'], ['id', 'DESC']] }) }); }
   catch (e) { next(e); }
 });
 

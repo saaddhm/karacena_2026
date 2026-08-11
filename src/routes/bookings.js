@@ -8,6 +8,8 @@ import { buildPaymentForm, verifyCmiHashDetailed, cmiConfigured, clientBaseUrl }
 import { confirmBookingPayment, markBookingClosed } from '../utils/bookingService.js';
 import { streamBookingTicketsPdf } from '../utils/ticketPdf.js';
 import { getBoolSetting } from '../utils/settings.js';
+import { buildBookingsWorkbook, attachmentDisposition } from '../utils/bookingsExcel.js';
+import { slugify } from '../utils/slug.js';
 
 const router = Router();
 const PASS_PRICE_MAD = 350;
@@ -237,6 +239,50 @@ router.post('/:reference/mark-paid', requireAuth, requireAdmin, async (req, res,
       return res.status(result.code === 'NOT_FOUND' ? 404 : 409).json({ error: result.code });
     }
     res.json({ ok: true, booking: result.booking });
+  } catch (e) { next(e); }
+});
+
+// Admin: export the bookings of ONE specific séance (showId + showDateId) as .xlsx.
+// Must be declared BEFORE the "/:reference" routes so "/export" is not captured
+// as a booking reference.
+router.get('/export', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const showId = Number(req.query.showId);
+    const showDateId = Number(req.query.showDateId);
+    if (!Number.isInteger(showId) || showId <= 0 || !Number.isInteger(showDateId) || showDateId <= 0) {
+      return res.status(400).json({ error: 'MISSING_PARAMS' });
+    }
+
+    // La séance doit exister ET appartenir au spectacle demandé (anti-fuite).
+    const showDate = await ShowDate.findByPk(showDateId, { include: [Show, Venue] });
+    if (!showDate) return res.status(404).json({ error: 'SHOWDATE_NOT_FOUND' });
+    if (Number(showDate.showId) !== showId) {
+      return res.status(400).json({ error: 'SHOWDATE_SHOW_MISMATCH' });
+    }
+
+    // Filtrage strict par identifiant de séance : aucune réservation d'une autre
+    // date du même spectacle ne peut apparaître.
+    const bookings = await Booking.findAll({
+      where: { showDateId },
+      include: [Ticket],
+      order: [['createdAt', 'ASC']],
+    });
+    if (!bookings.length) return res.status(404).json({ error: 'NO_BOOKINGS' });
+
+    const show = showDate.show;
+    const wb = buildBookingsWorkbook({ show, showDate, bookings });
+
+    const startsAt = String(showDate.startsAt || '');
+    const dm = startsAt.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    const stamp = dm ? `${dm[1]}-${dm[2]}-${dm[3]}-${dm[4]}-${dm[5]}` : 'seance';
+    const slug = show?.slug || slugify(show?.titleFr) || 'spectacle';
+    const asciiSource = `reservations-${slug}-${stamp}.xlsx`;
+    const readable = `reservations-${show?.titleFr || 'spectacle'}-${stamp}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', attachmentDisposition(asciiSource, readable));
+    await wb.xlsx.write(res);
+    res.end();
   } catch (e) { next(e); }
 });
 

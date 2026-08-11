@@ -346,7 +346,8 @@ export const Show = sequelize.define('show', {
   priceChildMad: { type: DataTypes.DECIMAL(8, 2), allowNull: true }, // tarif enfant (null = pas de tarif réduit)
   isFree: { type: DataTypes.BOOLEAN, defaultValue: false },
   isFeatured: { type: DataTypes.BOOLEAN, defaultValue: false },
-  isPublished: { type: DataTypes.BOOLEAN, defaultValue: true }
+  isPublished: { type: DataTypes.BOOLEAN, defaultValue: true },
+  displayOrder: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 } // ordre d'affichage (0 = auto)
 }, { tableName: 'shows' });
 
 // ---------- show_artists (junction) ----------

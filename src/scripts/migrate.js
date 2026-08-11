@@ -140,6 +140,18 @@ export async function runMigrations() {
     console.log('✔ migrated bookings.quantity_child');
   }
 
+  // 8f) shows.display_order — ordre d'affichage personnalisable (spectacles à l'affiche)
+  if (!(await columnType('shows', 'display_order'))) {
+    try {
+      await q(`ALTER TABLE shows ADD COLUMN display_order INT NOT NULL DEFAULT 0 AFTER is_published`);
+      console.log('✔ migrated shows.display_order');
+    } catch (e) {
+      // Retombe sans la clause AFTER si la colonne de référence manque.
+      await q(`ALTER TABLE shows ADD COLUMN display_order INT NOT NULL DEFAULT 0`);
+      console.log('✔ migrated shows.display_order (sans AFTER)');
+    }
+  }
+
   // 8d) settings (réglages globaux clé/valeur) + valeur par défaut
   await q(`CREATE TABLE IF NOT EXISTS settings (
     \`key\` VARCHAR(80) NOT NULL PRIMARY KEY,
