@@ -9,18 +9,29 @@ import {
   NewsletterSubscriber, ContactMessage, PressAccreditation,
   AtabadoulRegistration, MediaFile, Translation, Ticket
 } from '../models/index.js';
+import { computeDashboard } from '../utils/dashboardStats.js';
+import { buildReportWorkbook } from '../utils/reportExcel.js';
+import { attachmentDisposition } from '../utils/bookingsExcel.js';
 
 const router = Router();
 
-// Dashboard stats
+// Dashboard stats (agrégations réelles sur la période ?from=&to=)
 router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [shows, artists, subscribers, press, atabadoul, tickets, messages] = await Promise.all([
-      Show.count(), Artist.count(), NewsletterSubscriber.count(),
-      PressAccreditation.count({ where: { status: 'PENDING' } }),
-      AtabadoulRegistration.count(), Ticket.count(), ContactMessage.count({ where: { status: 'NEW' } })
-    ]);
-    res.json({ shows, artists, subscribers, pressPending: press, atabadoul, tickets, newMessages: messages });
+    res.json(await computeDashboard(req.query.from, req.query.to));
+  } catch (e) { next(e); }
+});
+
+// Export du rapport tableau de bord (.xlsx) sur la période sélectionnée
+router.get('/report', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const data = await computeDashboard(req.query.from, req.query.to);
+    const wb = buildReportWorkbook(data);
+    const filename = `rapport-karacena-${data.range.from}_${data.range.to}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', attachmentDisposition(filename, filename));
+    await wb.xlsx.write(res);
+    res.end();
   } catch (e) { next(e); }
 });
 
