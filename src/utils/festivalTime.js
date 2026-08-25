@@ -9,38 +9,69 @@
  * Pour comparer ces valeurs à « maintenant », il faut donc « maintenant » dans
  * le MÊME référentiel : l'heure murale à Casablanca. On la dérive avec Intl
  * (base IANA) et non avec un décalage fixe « +01:00 », car le Maroc recule ses
- * horloges d'une heure pendant le Ramadan : un offset codé en dur serait faux
- * une partie de l'année.
+ * horloges d'une heure pendant le Ramadan.
  *
- * Le serveur peut ainsi tourner en UTC, en Europe/Paris ou en Africa/Casablanca
- * sans changer le résultat.
+ * ROBUSTESSE : ce module ne doit JAMAIS empêcher l'API de démarrer. Certaines
+ * versions de Node compilées sans ICU complet (small-icu, images Alpine…) font
+ * lever RangeError à `new Intl.DateTimeFormat(..., { timeZone })`. Le
+ * formateur est donc construit paresseusement, dans un try/catch, avec un
+ * repli qui reste correct. Aucun appel Intl n'a lieu au chargement du module.
  */
 
 export const FESTIVAL_TZ = 'Africa/Casablanca';
 
-const PARTS = new Intl.DateTimeFormat('en-CA', {
-  timeZone: FESTIVAL_TZ,
-  year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit',
-  hour12: false
-});
+let cachedFormatter;   // undefined = pas encore tenté, null = indisponible
+
+function getFormatter() {
+  if (cachedFormatter !== undefined) return cachedFormatter;
+  try {
+    cachedFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: FESTIVAL_TZ,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+  } catch {
+    cachedFormatter = null;
+    console.warn(
+      `[festivalTime] Intl indisponible pour ${FESTIVAL_TZ} (Node sans ICU complet). `
+      + 'Repli sur un décalage fixe UTC+1.'
+    );
+  }
+  return cachedFormatter;
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+const fmt = (y, mo, d, h, mi, s) => `${y}-${pad(mo)}-${pad(d)} ${pad(h)}:${pad(mi)}:${pad(s)}`;
 
 /**
  * « Maintenant » à Casablanca, au format MySQL "YYYY-MM-DD HH:mm:ss".
  * Directement comparable à une colonne DATETIME via Op.gte / Op.lt.
+ * Ne lève jamais : en dernier recours on rend l'heure locale du serveur.
+ *
  * @param {Date} [now] injectable pour les tests
  */
 export function festivalNowSql(now = new Date()) {
+  const f = getFormatter();
+  if (f) {
+    try {
+      const p = {};
+      for (const part of f.formatToParts(now)) p[part.type] = part.value;
+      if (p.year && p.month && p.day && p.hour && p.minute && p.second) {
+        // Certaines implémentations rendent "24" pour minuit.
+        const hour = p.hour === '24' ? '00' : p.hour;
+        return `${p.year}-${p.month}-${p.day} ${hour}:${p.minute}:${p.second}`;
+      }
+    } catch { /* on bascule sur le repli ci-dessous */ }
+  }
+  // Repli 1 : UTC+1 (heure standard du Maroc).
   try {
-    const p = Object.fromEntries(PARTS.formatToParts(now).map((x) => [x.type, x.value]));
-    // Intl peut rendre "24" pour minuit selon l'implémentation : on normalise.
-    const hour = p.hour === '24' ? '00' : p.hour;
-    return `${p.year}-${p.month}-${p.day} ${hour}:${p.minute}:${p.second}`;
+    const d = new Date(now.getTime() + 3600 * 1000);
+    return fmt(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(),
+      d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
   } catch {
-    // Environnement sans base de fuseaux (build ICU minimal) : on retombe sur
-    // l'heure locale du serveur plutôt que de casser la requête.
-    const p = (n) => String(n).padStart(2, '0');
-    return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} `
-      + `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+    // Repli 2 : heure locale du serveur — mieux que planter la requête.
+    return fmt(now.getFullYear(), now.getMonth() + 1, now.getDate(),
+      now.getHours(), now.getMinutes(), now.getSeconds());
   }
 }

@@ -21,7 +21,12 @@ const fullInclude = [
 // son heure de début n'est pas dépassée, à l'heure murale de Casablanca — la
 // séance de 19:00 reste donc affichée toute la journée jusqu'à 19:00 pile.
 // Rien n'est supprimé en base : c'est un simple filtre de lecture.
-const upcomingWhere = () => ({ startsAt: { [Op.gte]: festivalNowSql() } });
+//
+// Coupe-circuit : poser HIDE_PAST_SHOW_DATES=false dans l'environnement
+// réaffiche toutes les séances, sans toucher au code (utile en cas de doute
+// en production). Toute autre valeur, ou l'absence de variable, garde le filtre.
+const FILTER_PAST = process.env.HIDE_PAST_SHOW_DATES !== 'false';
+const upcomingWhere = () => (FILTER_PAST ? { startsAt: { [Op.gte]: festivalNowSql() } } : {});
 
 // Tri chronologique des séances imbriquées dans un Show.
 const showDatesOrder = [{ model: ShowDate, as: 'showDates' }, 'startsAt', 'ASC'];
