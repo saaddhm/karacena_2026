@@ -91,6 +91,66 @@ router.get('/admin/stats', requireAuth, requireAdmin, async (req, res, next) => 
   } catch (e) { next(e); }
 });
 
+// ---------- Admin: download one ticket as PDF ----------
+// Authenticated counterpart of the public capability URL `GET /:code/pdf`.
+// Reuses the SAME generator (utils/ticketPdf.js) — no second PDF pipeline.
+// Declared before `/:code` so it is never swallowed by that catch-all route.
+//
+// Statuses: 400 malformed reference · 401 no token · 403 not an admin
+//           404 unknown ticket · 409 booking not payable · 503 pdfkit missing
+const TICKET_REF = /^[A-Za-z0-9_-]{4,64}$/;
+
+router.get('/admin/:reference/pdf', requireAuth, requireAdmin, async (req, res, next) => {
+  const { reference } = req.params;
+  if (!TICKET_REF.test(reference || '')) {
+    return res.status(400).json({ error: 'Référence de billet invalide.' });
+  }
+  try {
+    // The admin table exposes both identifiers, so accept either the opaque QR
+    // code or the human-readable serial (KRC-XXXX-01) — both are unique.
+    const ticket = await Ticket.findOne({
+      where: { [Op.or]: [{ code: reference }, { serial: reference }] },
+      include: fullInclude
+    });
+    if (!ticket) return res.status(404).json({ error: 'Billet introuvable.' });
+    if (ticket.booking?.paymentStatus !== 'PAID') {
+      return res.status(409).json({ error: 'Réservation non payée — aucun billet à émettre.' });
+    }
+
+    const filenameRef = ticket.serial || ticket.code.slice(0, 12);
+    const inline = req.query.disposition === 'inline';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename="ticket-${filenameRef}.pdf"`
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    await streamTicketPdf(res, {
+      serial: ticket.serial,
+      code: ticket.code,
+      status: ticket.status,
+      holderName: ticket.holderName,
+      qrDataUrl: ticket.qrDataUrl,
+      booking: ticket.booking,
+      show: ticket.booking?.showDate?.show,
+      showDate: ticket.booking?.showDate,
+      venue: ticket.booking?.showDate?.venue,
+      locale: req.query.lang === 'en' ? 'en' : 'fr'
+    });
+  } catch (e) {
+    if (e.code === 'ERR_MODULE_NOT_FOUND') {
+      return res.status(503).json({ error: 'PDF module not installed — run: npm install (server)' });
+    }
+    // Headers are already flushed once pdfkit starts piping: nothing left to
+    // negotiate, just log and drop the socket instead of leaking a stack trace.
+    if (res.headersSent) {
+      console.error('[tickets] admin PDF stream failed', e);
+      return res.destroy();
+    }
+    next(e);
+  }
+});
+
 // ---------- Admin: atomic entrance check-in ----------
 // Backend is the sole authority. Conditional UPDATE guarantees a ticket can
 // only be checked in once, even with two simultaneous scanners.
